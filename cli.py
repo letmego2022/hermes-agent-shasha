@@ -8164,6 +8164,8 @@ class HermesCLI:
             self._handle_voice_command(cmd_original)
         elif canonical == "busy":
             self._handle_busy_command(cmd_original)
+        elif canonical == "core":
+            self._handle_core_command(cmd_original)
         else:
             # Check for user-defined quick commands (bypass agent loop, no LLM call)
             base_cmd = cmd_lower.split()[0]
@@ -9285,6 +9287,61 @@ class HermesCLI:
             _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (saved to config){_RST}")
         else:
             _cprint(f"  {_ACCENT}✓ {feature_name} set to {label} (session only){_RST}")
+
+    def _handle_core_command(self, cmd: str):
+        """Handle /core — apply a CLI-focused core-only preset."""
+        parts = cmd.strip().split(maxsplit=1)
+        arg = parts[1].strip().lower() if len(parts) > 1 else "status"
+        if arg not in {"status", "apply", "lean", "verify"}:
+            _cprint(f"  {_DIM}Usage: /core [status|apply|lean|verify]{_RST}")
+            return
+
+        if arg == "status":
+            _cprint("  Core preset keeps: CLI + self-evolving skills + context compression + memory + task/QA loop.")
+            _cprint(f"  {_DIM}Run /core apply for safe core mode, or /core lean for aggressive cleanup toggles.{_RST}")
+            return
+        if arg == "verify":
+            checks = [
+                ("memory.memory_enabled", True, "三层记忆"),
+                ("compression.enabled", True, "上下文压缩"),
+                ("curator.enabled", True, "自进化 skills"),
+                ("agent.toolsets", ["hermes-cli"], "CLI 核心工具集"),
+            ]
+            failures: list[str] = []
+            for key, expected, label in checks:
+                actual = cfg_get(key, None)
+                if actual != expected:
+                    failures.append(f"{label}: expected={expected!r}, actual={actual!r}")
+            if failures:
+                _cprint(f"  {_DIM}(._.) Core verify failed:{_RST}")
+                for item in failures:
+                    _cprint(f"  {_DIM}- {item}{_RST}")
+                _cprint(f"  {_DIM}Tip: run /core apply (or /core lean) then restart Hermes.{_RST}")
+            else:
+                _cprint(f"  {_ACCENT}✓ Core verify passed: 核心能力配置完整。{_RST}")
+            return
+
+        updates = {
+            "agent.toolsets": ["hermes-cli"],
+            "agent.disabled_toolsets": ["gateway", "platforms", "voice", "image-gen", "browser", "kanban", "cron"],
+            "memory.memory_enabled": True,
+            "compression.enabled": True,
+            "curator.enabled": True,
+            "display.tool_progress_command": False,
+        }
+        if arg == "lean":
+            updates.update({
+                "display.interim_assistant_messages": False,
+                "stt.enabled": False,
+                "voice.enabled": False,
+                "display.runtime_footer.enabled": False,
+            })
+        failed: list[str] = [k for k, v in updates.items() if not save_config_value(k, v)]
+        if failed:
+            _cprint(f"  {_DIM}(._.) Failed to save: {', '.join(failed)}{_RST}")
+            return
+        mode = "lean core-only" if arg == "lean" else "core-only"
+        _cprint(f"  {_ACCENT}✓ {mode} preset applied (CLI-first). Restart Hermes to fully reload.{_RST}")
 
     def _on_reasoning(self, reasoning_text: str):
         """Callback for intermediate reasoning display during tool-call loops."""
